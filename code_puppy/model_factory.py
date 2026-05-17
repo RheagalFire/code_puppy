@@ -831,11 +831,11 @@ class ModelFactory:
             return OpenAIChatModel(model_name=model_config["name"], provider=provider)
 
         elif model_type == "litellm":
-            base_url = model_config.get("base_url") or os.environ.get("LITELLM_BASE_URL")
-            if not base_url:
+            try:
+                import litellm as _litellm
+            except ImportError:
                 emit_warning(
-                    f"LiteLLM base_url is not set (check model config or LITELLM_BASE_URL env var); "
-                    f"skipping model '{model_config.get('name')}'."
+                    "litellm is not installed. Install with: pip install litellm"
                 )
                 return None
 
@@ -847,11 +847,33 @@ class ModelFactory:
                 else:
                     api_key = api_key_config
             if not api_key:
-                api_key = get_api_key("LITELLM_API_KEY") or "unused"
+                api_key = get_api_key("LITELLM_API_KEY")
+
+            base_url = model_config.get("base_url") or os.environ.get("LITELLM_BASE_URL")
+
+            litellm_kwargs: dict[str, Any] = {"drop_params": True}
+            if api_key:
+                litellm_kwargs["api_key"] = api_key
+            if base_url:
+                litellm_kwargs["api_base"] = base_url
+
+            class _LiteLLMTransport(httpx.AsyncBaseTransport):
+                """Routes AsyncOpenAI HTTP calls through litellm.acompletion()."""
+
+                async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+                    import json as _json
+
+                    body = _json.loads(request.content)
+                    body.update(litellm_kwargs)
+                    response = await _litellm.acompletion(**body)
+                    return httpx.Response(
+                        status_code=200,
+                        json=response.model_dump(),
+                    )
 
             client = AsyncOpenAI(
-                base_url=base_url,
-                api_key=api_key,
+                api_key="unused",
+                http_client=httpx.AsyncClient(transport=_LiteLLMTransport()),
             )
             provider = make_openai_provider(provider_identity, openai_client=client)
             return OpenAIChatModel(model_name=model_config["name"], provider=provider)

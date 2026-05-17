@@ -40,7 +40,7 @@ class TestLiteLLMFactoryDispatch:
             assert model is not None
             assert model.model_name == "openai/gpt-4o"
 
-    def test_litellm_missing_base_url_returns_none(self):
+    def test_litellm_works_without_base_url(self):
         from code_puppy.model_factory import ModelFactory
 
         config = {
@@ -51,10 +51,9 @@ class TestLiteLLMFactoryDispatch:
             }
         }
         with patch.dict(os.environ, {}, clear=True):
-            # Remove LITELLM_BASE_URL if it exists
             os.environ.pop("LITELLM_BASE_URL", None)
             model = ModelFactory.get_model("litellm-model", config)
-            assert model is None
+            assert model is not None
 
     def test_litellm_with_api_key_env_ref(self):
         from code_puppy.model_factory import ModelFactory
