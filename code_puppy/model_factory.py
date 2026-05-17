@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import httpx
 from anthropic import AsyncAnthropic
-from openai import AsyncAzureOpenAI
+from openai import AsyncAzureOpenAI, AsyncOpenAI
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.openai import (
     OpenAIChatModel,
@@ -828,6 +828,32 @@ class ModelFactory:
 
             provider = OpenRouterProvider(api_key=api_key)
 
+            return OpenAIChatModel(model_name=model_config["name"], provider=provider)
+
+        elif model_type == "litellm":
+            base_url = model_config.get("base_url") or os.environ.get("LITELLM_BASE_URL")
+            if not base_url:
+                emit_warning(
+                    f"LiteLLM base_url is not set (check model config or LITELLM_BASE_URL env var); "
+                    f"skipping model '{model_config.get('name')}'."
+                )
+                return None
+
+            api_key_config = model_config.get("api_key")
+            api_key = None
+            if api_key_config:
+                if api_key_config.startswith("$"):
+                    api_key = get_api_key(api_key_config[1:])
+                else:
+                    api_key = api_key_config
+            if not api_key:
+                api_key = get_api_key("LITELLM_API_KEY") or "unused"
+
+            client = AsyncOpenAI(
+                base_url=base_url,
+                api_key=api_key,
+            )
+            provider = make_openai_provider(provider_identity, openai_client=client)
             return OpenAIChatModel(model_name=model_config["name"], provider=provider)
 
         elif model_type == "gemini_oauth":
