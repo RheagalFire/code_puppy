@@ -3,11 +3,15 @@
 import os
 from unittest.mock import patch, MagicMock
 
+import pytest
 
-class TestLiteLLMModelConfig:
-    """Test LiteLLM model configuration structure."""
 
-    def test_litellm_config_structure(self):
+class TestLiteLLMFactoryDispatch:
+    """Test that ModelFactory.get_model dispatches litellm type correctly."""
+
+    def test_litellm_creates_model_with_base_url(self):
+        from code_puppy.model_factory import ModelFactory
+
         config = {
             "litellm-claude": {
                 "type": "litellm",
@@ -17,25 +21,75 @@ class TestLiteLLMModelConfig:
                 "context_length": 200000,
             }
         }
-        model_config = config.get("litellm-claude")
-        assert model_config["type"] == "litellm"
-        assert model_config["name"] == "anthropic/claude-sonnet-4-20250514"
-        assert model_config["base_url"] == "http://localhost:4000/v1"
+        model = ModelFactory.get_model("litellm-claude", config)
+        assert model is not None
+        assert model.model_name == "anthropic/claude-sonnet-4-20250514"
 
-    def test_litellm_config_with_api_key_env_ref(self):
+    def test_litellm_uses_env_base_url(self):
+        from code_puppy.model_factory import ModelFactory
+
         config = {
             "litellm-model": {
                 "type": "litellm",
                 "provider": "litellm",
                 "name": "openai/gpt-4o",
-                "base_url": "https://litellm.example.com/v1",
-                "api_key": "$LITELLM_API_KEY",
             }
         }
-        model_config = config.get("litellm-model")
-        assert model_config["api_key"] == "$LITELLM_API_KEY"
+        with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://proxy:4000/v1"}):
+            model = ModelFactory.get_model("litellm-model", config)
+            assert model is not None
+            assert model.model_name == "openai/gpt-4o"
 
-    def test_litellm_config_without_api_key(self):
+    def test_litellm_missing_base_url_returns_none(self):
+        from code_puppy.model_factory import ModelFactory
+
+        config = {
+            "litellm-model": {
+                "type": "litellm",
+                "provider": "litellm",
+                "name": "openai/gpt-4o",
+            }
+        }
+        with patch.dict(os.environ, {}, clear=True):
+            # Remove LITELLM_BASE_URL if it exists
+            os.environ.pop("LITELLM_BASE_URL", None)
+            model = ModelFactory.get_model("litellm-model", config)
+            assert model is None
+
+    def test_litellm_with_api_key_env_ref(self):
+        from code_puppy.model_factory import ModelFactory
+
+        config = {
+            "litellm-hosted": {
+                "type": "litellm",
+                "provider": "litellm",
+                "name": "anthropic/claude-sonnet-4-20250514",
+                "base_url": "https://litellm.example.com/v1",
+                "api_key": "$MY_LITELLM_KEY",
+            }
+        }
+        with patch.dict(os.environ, {"MY_LITELLM_KEY": "sk-hosted-key"}):
+            model = ModelFactory.get_model("litellm-hosted", config)
+            assert model is not None
+
+    def test_litellm_with_raw_api_key(self):
+        from code_puppy.model_factory import ModelFactory
+
+        config = {
+            "litellm-direct": {
+                "type": "litellm",
+                "provider": "litellm",
+                "name": "openai/gpt-4o",
+                "base_url": "http://localhost:4000/v1",
+                "api_key": "sk-direct-key",
+            }
+        }
+        model = ModelFactory.get_model("litellm-direct", config)
+        assert model is not None
+
+    def test_litellm_api_key_defaults_to_unused(self):
+        from code_puppy.model_factory import ModelFactory
+
         config = {
             "litellm-local": {
                 "type": "litellm",
@@ -44,47 +98,29 @@ class TestLiteLLMModelConfig:
                 "base_url": "http://localhost:4000/v1",
             }
         }
-        model_config = config.get("litellm-local")
-        assert "api_key" not in model_config
-
-
-class TestLiteLLMEnvironmentVariables:
-    """Test LiteLLM environment variable handling."""
-
-    def test_litellm_base_url_env(self):
-        with patch.dict(os.environ, {"LITELLM_BASE_URL": "http://localhost:4000/v1"}):
-            base_url = os.environ.get("LITELLM_BASE_URL")
-            assert base_url == "http://localhost:4000/v1"
-
-    def test_litellm_api_key_env(self):
-        with patch.dict(os.environ, {"LITELLM_API_KEY": "sk-litellm-test"}):
-            api_key = os.environ.get("LITELLM_API_KEY")
-            assert api_key == "sk-litellm-test"
-
-    def test_litellm_api_key_defaults_to_unused(self):
         with patch.dict(os.environ, {}, clear=True):
-            api_key = os.environ.get("LITELLM_API_KEY") or "unused"
-            assert api_key == "unused"
+            os.environ.pop("LITELLM_API_KEY", None)
+            model = ModelFactory.get_model("litellm-local", config)
+            assert model is not None
 
 
-class TestLiteLLMModelType:
-    """Test that litellm model type is recognized in the factory dispatch."""
+class TestLiteLLMProviderIdentity:
+    """Test provider identity resolution for litellm."""
 
-    def test_litellm_type_dispatches_correctly(self):
-        model_config = {
-            "type": "litellm",
-            "provider": "litellm",
-            "name": "anthropic/claude-sonnet-4-20250514",
-            "base_url": "http://localhost:4000/v1",
-        }
-        assert model_config.get("type") == "litellm"
+    def test_litellm_in_type_overrides(self):
+        from code_puppy.provider_identity import _TYPE_PROVIDER_OVERRIDES
 
-    def test_litellm_supports_multiple_providers(self):
-        models = [
-            {"name": "anthropic/claude-sonnet-4-20250514", "type": "litellm"},
-            {"name": "openai/gpt-4o", "type": "litellm"},
-            {"name": "bedrock/anthropic.claude-3-sonnet", "type": "litellm"},
-            {"name": "vertex_ai/gemini-2.5-flash", "type": "litellm"},
-        ]
-        for model in models:
-            assert model["type"] == "litellm"
+        assert "litellm" in _TYPE_PROVIDER_OVERRIDES
+        assert _TYPE_PROVIDER_OVERRIDES["litellm"] == "litellm"
+
+    def test_resolve_identity_with_explicit_provider(self):
+        from code_puppy.provider_identity import resolve_provider_identity
+
+        config = {"type": "litellm", "provider": "litellm"}
+        assert resolve_provider_identity("litellm-claude", config) == "litellm"
+
+    def test_resolve_identity_from_type_override(self):
+        from code_puppy.provider_identity import resolve_provider_identity
+
+        config = {"type": "litellm"}
+        assert resolve_provider_identity("litellm-claude", config) == "litellm"

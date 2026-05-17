@@ -49,6 +49,7 @@ _TYPE_PROVIDER_OVERRIDES = {
     "aws_bedrock": "aws_bedrock",
     "azure_openai": "azure_openai",
     "azure_foundry_openai": "azure_foundry_openai",
+    "litellm": "litellm",
 }
 
 _KEY_PREFIX_OVERRIDES = (
